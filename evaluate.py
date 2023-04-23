@@ -40,7 +40,7 @@ def do_eval(det_results, gt_results, CLASSES, saved_path):
     CLASSES: dict
     '''
     assert len(det_results) == len(gt_results)
-    f = open(os.path.join(saved_path, 'eval_results.txt'), 'w')
+    f = open(os.path.join(saved_path, 'eval_results_10epoch_smoothl1.txt'), 'w')
 
     # 1. calculate iou
     ious = {
@@ -49,15 +49,23 @@ def do_eval(det_results, gt_results, CLASSES, saved_path):
         'bbox_3d': []
     }
     ids = list(sorted(gt_results.keys()))
+    #print(len(det_results))
+    #print(len(gt_results))
     for id in ids:
+        #print(id)
         gt_result = gt_results[id]['annos']
         det_result = det_results[id]
-
+        #print("gt_result",gt_result)
+        #print("det_result",det_result)
         # 1.1, 2d bboxes iou
         gt_bboxes2d = gt_result['bbox'].astype(np.float32)
         det_bboxes2d = det_result['bbox'].astype(np.float32)
-        iou2d_v = iou2d(torch.from_numpy(gt_bboxes2d).cuda(), torch.from_numpy(det_bboxes2d).cuda())
-        ious['bbox_2d'].append(iou2d_v.cpu().numpy())
+        if len(det_bboxes2d) != 0:
+            iou2d_v = iou2d(torch.from_numpy(gt_bboxes2d).cuda(), torch.from_numpy(det_bboxes2d).cuda())
+            ious['bbox_2d'].append(iou2d_v.cpu().numpy())
+        else:
+            iou2d_v = np.zeros((len(gt_bboxes2d), 1))
+            ious['bbox_2d'].append(iou2d_v)
 
         # 1.2, bev iou
         gt_location = gt_result['location'].astype(np.float32)
@@ -68,15 +76,23 @@ def do_eval(det_results, gt_results, CLASSES, saved_path):
         det_rotation_y = det_result['rotation_y'].astype(np.float32)
 
         gt_bev = np.concatenate([gt_location[:, [0, 2]], gt_dimensions[:, [0, 2]], gt_rotation_y[:, None]], axis=-1)
-        det_bev = np.concatenate([det_location[:, [0, 2]], det_dimensions[:, [0, 2]], det_rotation_y[:, None]], axis=-1)
-        iou_bev_v = iou_bev(torch.from_numpy(gt_bev).cuda(), torch.from_numpy(det_bev).cuda())
-        ious['bbox_bev'].append(iou_bev_v.cpu().numpy())
+        if len(det_location) != 0:
+            det_bev = np.concatenate([det_location[:, [0, 2]], det_dimensions[:, [0, 2]], det_rotation_y[:, None]], axis=-1)
+            iou_bev_v = iou_bev(torch.from_numpy(gt_bev).cuda(), torch.from_numpy(det_bev).cuda())
+            ious['bbox_bev'].append(iou_bev_v.cpu().numpy())
+        else:
+            iou2d_v = np.zeros((len(gt_bev), 1))
+            ious['bbox_bev'].append(iou2d_v)
 
         # 1.3, 3dbboxes iou
         gt_bboxes3d = np.concatenate([gt_location, gt_dimensions, gt_rotation_y[:, None]], axis=-1)
-        det_bboxes3d = np.concatenate([det_location, det_dimensions, det_rotation_y[:, None]], axis=-1)
-        iou3d_v = iou3d_camera(torch.from_numpy(gt_bboxes3d).cuda(), torch.from_numpy(det_bboxes3d).cuda())
-        ious['bbox_3d'].append(iou3d_v.cpu().numpy())
+        if len(det_location) != 0:
+            det_bboxes3d = np.concatenate([det_location, det_dimensions, det_rotation_y[:, None]], axis=-1)
+            iou3d_v = iou3d_camera(torch.from_numpy(gt_bboxes3d).cuda(), torch.from_numpy(det_bboxes3d).cuda())
+            ious['bbox_3d'].append(iou3d_v.cpu().numpy())
+        else:
+            iou3d_v = np.zeros((len(gt_bboxes3d), 1))
+            ious['bbox_3d'].append(iou3d_v)
 
     MIN_IOUS = {
         'Pedestrian': [0.5, 0.5, 0.5],
@@ -131,19 +147,26 @@ def do_eval(det_results, gt_results, CLASSES, saved_path):
 
                     # 1.2 det bbox property
                     cur_det_names = det_result['name']
-                    cur_det_heights = det_result['bbox'][:, 3] - det_result['bbox'][:, 1]
-                    det_ignores = []
-                    for j, cur_det_name in enumerate(cur_det_names):
-                        if cur_det_heights[j] < MIN_HEIGHT[difficulty]:
-                            det_ignores.append(1)
-                        elif cur_det_name == cls:
-                            det_ignores.append(0)
-                        else:
-                            det_ignores.append(-1)
-                    total_det_ignores.append(det_ignores)
-                    total_scores.append(det_result['score'])
-                    total_det_alpha.append(det_result['alpha'])
-
+                    if len(cur_det_names) != 0:
+                        cur_det_heights = det_result['bbox'][:, 3] - det_result['bbox'][:, 1]
+                        det_ignores = []
+                        for j, cur_det_name in enumerate(cur_det_names):
+                            if cur_det_heights[j] < MIN_HEIGHT[difficulty]:
+                                det_ignores.append(1)
+                            elif cur_det_name == cls:
+                                det_ignores.append(0)
+                            else:
+                                det_ignores.append(-1)
+                        total_det_ignores.append(det_ignores)
+                        total_scores.append(det_result['score'])
+                        total_det_alpha.append(det_result['alpha'])
+                    else:
+                        cur_det_heights = 1e-7
+                        det_ignores = []
+                        det_ignores.append(1)
+                        total_det_ignores.append(det_ignores)
+                        total_scores.append([1e-7])
+                        total_det_alpha.append([1e-7])
                 # 2. calculate scores thresholds for PR curve
                 tp_scores = []
                 for i, id in enumerate(ids):
